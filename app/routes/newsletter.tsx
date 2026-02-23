@@ -1,5 +1,5 @@
 import { Form, useActionData } from "react-router";
-import type { MetaFunction } from "react-router";
+import type { ActionFunctionArgs, MetaFunction } from "react-router";
 
 export const meta: MetaFunction = () => [
   { title: "Newsletter - Sahil Sharma" },
@@ -10,7 +10,62 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-export async function action() {
+export async function action({ request, context }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { success: false, error: "Please enter a valid email address." };
+  }
+
+  const { DB, RESEND_API_KEY, RESEND_FROM_EMAIL } = context.cloudflare.env;
+  const token = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  try {
+    await DB.prepare(
+      "INSERT INTO subscribers (email, subscribed_at, status, unsubscribe_token) VALUES (?, ?, 'active', ?)"
+    )
+      .bind(email, now, token)
+      .run();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("UNIQUE constraint failed")) {
+      return { success: false, error: "You're already subscribed!" };
+    }
+    console.error("D1 insert error:", err);
+    return { success: false, error: "Something went wrong. Please try again." };
+  }
+
+  const origin = new URL(request.url).origin;
+  const unsubscribeUrl = `${origin}/unsubscribe?token=${token}`;
+
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: RESEND_FROM_EMAIL,
+        to: email,
+        subject: "Welcome to Sahil's Newsletter",
+        html: `
+          <h2>Welcome aboard!</h2>
+          <p>Thanks for subscribing. You'll get articles on React, TypeScript, and modern web development delivered to your inbox.</p>
+          <p>If you ever want to unsubscribe, <a href="${unsubscribeUrl}">click here</a>.</p>
+        `,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("Resend error:", res.status, body);
+    }
+  } catch (err) {
+    console.error("Failed to send welcome email:", err);
+  }
+
   return { success: true };
 }
 
@@ -104,6 +159,9 @@ export default function Newsletter() {
                   Subscribe
                 </button>
               </Form>
+              {actionData && !actionData.success && actionData.error && (
+                <p className="mt-3 text-sm text-red-600 dark:text-red-400">{actionData.error}</p>
+              )}
             </>
           )}
         </section>

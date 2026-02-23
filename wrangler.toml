@@ -1,3 +1,8 @@
 name = "sahil-personal-website"
 compatibility_date = "2024-01-01"
 pages_build_output_dir = "build/client"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "newsletter"
+database_id = "384a1b1f-d402-42c2-b1aa-f7288db3fddc"
