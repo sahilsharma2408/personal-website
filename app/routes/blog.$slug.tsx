@@ -9,14 +9,16 @@ const postComponents = import.meta.glob<{ default: React.ComponentType }>(
 );
 
 const TAG_COLORS: Record<string, string> = {
-  React: "bg-blue-500/20 text-blue-400",
-  "React Router": "bg-blue-500/20 text-blue-400",
-  TypeScript: "bg-sky-500/20 text-sky-400",
-  Cloudflare: "bg-orange-500/20 text-orange-400",
-  DevOps: "bg-green-500/20 text-green-400",
-  Productivity: "bg-purple-500/20 text-purple-400",
-  Tools: "bg-yellow-500/20 text-yellow-400",
-  "Developer Experience": "bg-pink-500/20 text-pink-400",
+  React: "bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400",
+  "React Router": "bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400",
+  TypeScript: "bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400",
+  Cloudflare: "bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400",
+  DevOps: "bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400",
+  Frontend: "bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400",
+  Performance: "bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400",
+  "Design Systems": "bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-400",
+  Analytics: "bg-teal-100 dark:bg-teal-500/20 text-teal-700 dark:text-teal-400",
+  Productivity: "bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400",
 };
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
@@ -91,7 +93,7 @@ export default function BlogPost() {
             <span
               key={tag}
               className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                TAG_COLORS[tag] || "bg-gray-700/50 text-gray-400"
+                TAG_COLORS[tag] || "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
               }`}
             >
               {tag}

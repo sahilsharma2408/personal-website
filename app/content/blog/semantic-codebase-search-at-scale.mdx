@@ -1,0 +1,271 @@
+---
+title: "Building Semantic Codebase Search Across 600+ Repositories"
+date: "2026-02-23"
+description: "How we built company-wide semantic code search across multiple GitHub organizations using vector embeddings, git-based incremental indexing, and an MCP HTTP server — and how we made it 54x faster."
+tags: ["DevOps", "Performance"]
+readTime: "9 min read"
+published: true
+---
+
+Here's a problem that doesn't sound hard until you're actually living it: you need to find how authentication is implemented across your company's codebase.
+
+You could search on GitHub. But GitHub's code search doesn't understand semantics — it finds files containing the word "authentication", not files *doing* authentication. You'd need to know the exact function names or class names used in each repo. And with 600+ repositories across multiple GitHub organizations, that's not a search problem anymore. It's a needle-in-a-haystack problem where the needle keeps moving.
+
+We built a solution: enterprise semantic code search powered by vector embeddings, with git-based incremental indexing that keeps the index fresh without burning through compute. Here's how it works, what we got wrong the first time, and what made the second approach dramatically better.
+
+## The Problem with Keyword Search at Scale
+
+A large engineering team spread across multiple GitHub organizations — repositories in Go, TypeScript, Python, Java, and more — runs into this constantly. When someone asks "how do other services handle JWT validation?" or "where is the rate limiting logic?", keyword search fails them in a few predictable ways:
+
+- Different teams use different naming conventions. One service calls it `authenticateUser`, another `verifyToken`, another `checkJWT`.
+- Relevant logic is often buried inside functions named something generic like `processRequest`.
+- You have to know what you're looking for to find it. Semantic search is useful precisely when you don't.
+
+The solution is vector embeddings: encode all code as high-dimensional vectors where semantically similar code clusters together, then answer queries by finding nearest neighbors. The technology exists. The challenge is making it work at scale — 600+ repos, hundreds of thousands of files — and keeping the index current without it becoming a full-time job.
+
+## Architecture Overview
+
+The system has two services:
+
+**Indexing Service** — auto-discovers all repositories from configured GitHub organizations, clones them locally, and indexes them into a Zilliz Cloud (Milvus) vector database. Runs on a cron schedule every 6 hours.
+
+**MCP HTTP Server** — wraps the vector database as an HTTP endpoint implementing the [Model Context Protocol](https://modelcontextprotocol.io), so any MCP-compatible client (including Claude) can query the codebase semantically.
+
+```
+GitHub Orgs (org-a, org-b, ...)
+         ↓
+   Indexing Service
+  (auto-discover → clone → embed → index)
+         ↓
+  Zilliz Cloud (Milvus)
+  (unified vector collection)
+         ↓
+   MCP HTTP Server
+  (JSON-RPC 2.0 endpoint)
+         ↓
+  Claude / Cursor / any MCP client
+```
+
+Searching the entire codebase is a single MCP tool call:
+
+```bash
+curl -X POST https://mcp.internal.example.com/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "search_code",
+      "arguments": {
+        "query": "JWT token validation middleware",
+        "limit": 10,
+        "extensionFilter": [".go", ".ts"]
+      }
+    }
+  }'
+```
+
+## Multi-Organization Indexing
+
+Multiple GitHub organizations are indexed into the same vector collection. This makes search feel unified: you ask about "rate limiting" and get results from all orgs without needing to know where to look.
+
+The key challenge is namespace isolation. If two orgs both have a `backend-api` repository, their file paths (`src/middleware.ts`) would collide in the index. We solve this by prefixing every file path with the repository's full name:
+
+```
+org-a/backend-api/src/middleware.ts
+org-b/backend-api/src/auth.ts
+```
+
+Configuration is a single environment variable:
+
+```bash
+GITHUB_ORGS=org-a,org-b
+```
+
+One nice property of this design: adding a new organization doesn't require re-indexing anything. The indexer discovers the new org's repos on its next run and indexes only those. Existing repos are unchanged because their last indexed commit is already saved in state.
+
+## The Incremental Indexing Problem
+
+The first version of the indexer used the incremental indexing strategy built into the core library: a Merkle-tree-based file snapshot system. Every 6 hours:
+
+1. Scan all 337,000+ files across all repos
+2. Hash every file
+3. Build a Merkle DAG
+4. Compare against previous snapshot to find changes
+5. Index only the changed files
+
+The math looked fine on paper. In practice, step 1-4 took **9 minutes even when nothing had changed**. With a 6-hour cron schedule, that's:
+
+- 4 runs/day × 9 minutes = **36 minutes/day** just detecting that no changes happened
+- 22 GB of snapshot state files growing over time
+- A read-only filesystem incompatibility in our Kubernetes setup
+
+The root cause: we were using the filesystem as the source of truth when we already had a much better source of truth: **git**.
+
+## Git-Based Change Detection
+
+Git already knows exactly what changed between any two commits. `git diff` can tell you every added, modified, renamed, and deleted file in seconds. We already had all repos cloned locally. The entire Merkle approach was unnecessary.
+
+The replacement is `GitStateTracker` + `GitUtils`:
+
+```typescript
+// What we save per repository (50KB for all 665 repos)
+interface RepositoryState {
+  lastIndexedCommit: string;     // Full commit hash
+  lastIndexedAt: string;          // ISO timestamp
+  status: 'complete' | 'partial' | 'pending' | 'failed';
+  lastFileIndex?: number;         // For resuming interrupted runs
+  totalFiles?: number;
+}
+```
+
+On every run:
+
+```typescript
+// 1. Load state from previous run
+const savedCommit = gitState.getRepository(repoName)?.lastIndexedCommit;
+
+// 2. Pull latest changes
+execSync('git pull --force', { cwd: repoPath });
+
+// 3. Get current commit
+const currentCommit = GitUtils.getCurrentCommit(repoPath);
+
+// 4. If same commit, nothing to do
+if (savedCommit === currentCommit) return null;
+
+// 5. Get exactly which files changed
+const changes = GitUtils.getChangedFiles(repoPath, savedCommit, currentCommit);
+// { added: [...], modified: [...], deleted: [...] }
+
+// 6. Update the index for only those files
+await incrementalIndexer.applyChanges(changes, repoPath);
+
+// 7. Save new commit hash
+gitState.updateRepository(repoName, currentCommit, 'complete');
+```
+
+The performance difference:
+
+| Scenario         | Merkle Approach | Git-Based | Speedup   |
+|------------------|-----------------|-----------|-----------|
+| No changes       | 9 min           | 10 sec    | **54x**   |
+| 50 files changed | 9 min           | 2 min     | **4.5x**  |
+| First full run   | ~60 min         | ~60 min   | 1x        |
+
+The first run is identical — you have to index everything the first time. But every subsequent run is dramatically faster because git's change detection is O(log n) instead of O(files).
+
+Monthly savings: ~15 hours of compute that was previously spent detecting that nothing changed.
+
+## Bypassing Merkle Trees Entirely
+
+The core library has a `processFileList()` method that indexes a specific list of files without building Merkle snapshots. It's a private method, which would normally make this a dead end. But the library is a dependency we control the deployment of, and we knew the method existed and was stable.
+
+```typescript
+// Direct access to private Context method — pragmatic, not pretty
+const processFileList = (this.context as any).processFileList.bind(this.context);
+await processFileList(filePaths, workspaceRoot, onProgress);
+```
+
+This is the kind of hack that makes purists uncomfortable but makes production engineers nod approvingly. We're not monkey-patching or modifying the library. We're calling a method that exists and works correctly. The alternative — forking the library to make the method public — would create a maintenance burden that isn't worth it for one call site.
+
+The result: no Merkle snapshots are created. No `~/.context/merkle/` files. No filesystem bloat. No incompatibility with read-only Kubernetes volumes.
+
+## Resilience Patterns
+
+At 600+ repos, some things will always fail. A GitHub API rate limit. A network timeout mid-clone. A Zilliz connection drop. The system has to handle these without taking down the whole indexing run.
+
+**Circuit Breaker** — prevents cascade failures when a downstream service starts erroring:
+
+```typescript
+// GitHub: Opens after 5 failures, 1-minute recovery
+// Zilliz: Opens after 3 failures, 2-minute recovery
+// When OPEN: fail fast instead of waiting for timeouts
+```
+
+**Exponential Backoff with Jitter** — for retryable errors:
+- GitHub operations: 3 retries, 1s–10s delay
+- Zilliz operations: 3 retries, 2s–30s delay
+- Rate limit 429 responses get extra backoff
+
+**Error Classification** — not all errors should be retried:
+- `NETWORK` errors (connection refused, timeout) → retry
+- `RATE_LIMIT` (429) → retry with extra backoff
+- `AUTHENTICATION` (401, 403) → fail immediately, alert
+- `NOT_FOUND` (404) → fail immediately, skip repo
+
+**Graceful Degradation** — one organization failing doesn't block others:
+
+```typescript
+for (const org of organizations) {
+  try {
+    const repos = await discoverRepositories(org);
+    allRepos.push(...repos);
+  } catch (error) {
+    // Log and continue — don't let one org take down the run
+    console.error(`Failed to discover ${org}: ${error.message}`);
+  }
+}
+```
+
+**Resume Support** — the state tracker stores `lastFileIndex` so a pod interruption mid-indexing can resume from where it left off instead of starting over.
+
+## Embedding Providers
+
+One architectural decision that paid off: making the embedding provider pluggable from configuration.
+
+```bash
+EMBEDDING_PROVIDER=voyage   # or openai, gemini, ollama
+VOYAGE_API_KEY=xxx
+```
+
+We support four providers, each with different tradeoffs:
+
+| Provider       | Model                    | Best For                       |
+|----------------|--------------------------|--------------------------------|
+| OpenAI         | text-embedding-3-small   | General purpose, well-tested   |
+| Google Gemini  | gemini-embedding-001     | 3072 dimensions, Matryoshka    |
+| Voyage AI      | voyage-code-3            | **Code-specific** training     |
+| Ollama         | nomic-embed-text         | Self-hosted, private data      |
+
+For code search specifically, Voyage AI's `voyage-code-3` model is noticeably better — it's trained on code repositories and understands things like function signatures, variable names, and comment-code relationships. We switched to Gemini for cost reasons in production, but the ability to switch providers without re-architecting anything was worth the abstraction.
+
+The only hard constraint: the indexing service and MCP server must use the same provider and model. The vectors have to live in the same embedding space for search to work.
+
+## Kubernetes Deployment
+
+The indexer runs as a single-replica Deployment with a `Recreate` rollout strategy — you don't want two indexers running simultaneously and overwriting each other's state.
+
+The MCP server runs as 2+ replicas with a standard `RollingUpdate` strategy. It's stateless: every query goes directly to Zilliz, so horizontal scaling is straightforward.
+
+The biggest operational concern is storage. All 600+ repos are cloned locally and kept in sync. That's 300+ GB mounted via PersistentVolumeClaim:
+
+```yaml
+volumes:
+  - name: workspace
+    persistentVolumeClaim:
+      claimName: indexer-workspace
+```
+
+The git state file lives in `workspace/.git-state/git-state.json`. It's a 50KB JSON file tracking last indexed commits for all repos. Keeping it on the PVC means it survives pod restarts — which is critical for incremental indexing to work correctly.
+
+## What I'd Do Differently
+
+**Parallel cloning.** We clone repositories sequentially. For 600+ repos, the initial run takes 10+ minutes just for git operations that could be parallelized. The complication is GitHub rate limits, but we could clone 5–10 repos in parallel safely.
+
+**Webhook-driven indexing.** The 6-hour cron is a blunt instrument. A GitHub webhook on push events would let us index changes within seconds of a commit, not hours. The git-based incremental indexer makes this feasible — each webhook triggers a pull and a diff for that specific repo.
+
+**Smarter shallow clones.** We do shallow clones (`--depth 1`) for first-time repos, which is faster. But switching between shallow and full clone as a repo's history grows adds complexity. We've had a few edge cases where shallow clone state gets confused after force pushes. Worth revisiting the clone strategy.
+
+**Explicit Merkle fork instead of private method access.** The type assertion hack works but it's brittle. If the library refactors `processFileList`, we won't get a compile-time error. The right long-term fix is to contribute a public API upstream or maintain our own fork.
+
+## The Result
+
+Any engineer can now ask "how does service X handle Y?" and get semantically relevant code snippets across all 600+ repositories in under 2 seconds. It works in Claude, in Cursor, and from the command line.
+
+The indexer runs every 6 hours and typically completes in under 3 minutes for routine update cycles. The 54x speedup in change detection wasn't a nice-to-have — it's what made the whole thing practical to run in production without dedicated compute.
+
+The MCP protocol turned out to be the right abstraction layer. Because we speak standard MCP over HTTP, any client that supports MCP gets codebase search for free. We didn't need to build IDE plugins or CLI tools. We built one endpoint and the ecosystem did the rest.
+
+Semantic search isn't magic. It works because code has structure that embedding models have learned to understand. The engineering challenge isn't the search itself — it's keeping a large, distributed index current without it becoming a maintenance burden. Git already solved the hard problem of tracking what changed. We just needed to listen to it.

@@ -11,6 +11,17 @@ export interface Talk {
 
 export const talks: Talk[] = [
   {
+    title: "Scale enterprise apps with Micro frontends & Monorepo",
+    event: "React India 2025",
+    eventUrl: "https://www.reactindia.io/talks",
+    date: "November 2025",
+    description:
+      "Growing React teams struggle with inconsistent tooling, complex deployments & cross-team coordination. Micro frontend monorepos provide a solution through architectural harmony — covering shared infrastructure, independent deployability, consistent developer experience, and enterprise-scale team coordination.",
+    tags: ["react", "performance", "dx"],
+    youtubeUrl: "https://www.youtube.com/watch?v=R4K6OsYPcJc&t=44s",
+    slidesUrl: null,
+  },
+  {
     title: "Building Design Systems That Scale: From Monorepo to 15+ Teams",
     event: "React Conf India 2024",
     eventUrl: null,
