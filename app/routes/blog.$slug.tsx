@@ -50,7 +50,7 @@ export default function BlogPost() {
       {/* Back link */}
       <Link
         to="/blog"
-        className="inline-flex items-center text-sm text-gray-400 hover:text-white transition-colors mb-8"
+        className="inline-flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mb-8"
       >
         <svg
           className="w-4 h-4 mr-1"
@@ -70,7 +70,7 @@ export default function BlogPost() {
 
       {/* Post header */}
       <header className="mb-10">
-        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-4 leading-tight">
+        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-gray-900 dark:text-white mb-4 leading-tight">
           {post.frontmatter.title}
         </h1>
 
@@ -108,22 +108,22 @@ export default function BlogPost() {
           <div className="text-gray-500 py-8">Loading article...</div>
         }
       >
-        <article className="prose prose-invert prose-lg max-w-none prose-headings:text-white prose-a:text-primary hover:prose-a:text-primary-dark prose-code:text-gray-300 prose-pre:bg-gray-900 prose-pre:border prose-pre:border-gray-800">
+        <article className="prose prose-gray dark:prose-invert prose-lg max-w-none prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-pre:bg-gray-900 prose-pre:border prose-pre:border-gray-800">
           <PostContent />
         </article>
       </React.Suspense>
 
       {/* Newsletter CTA */}
-      <div className="mt-16 p-8 rounded-xl bg-gray-900 border border-gray-800">
-        <h3 className="text-xl font-semibold text-white mb-2">
+      <div className="mt-16 p-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
           Enjoyed this article?
         </h3>
-        <p className="text-gray-400 mb-4">
+        <p className="text-gray-600 dark:text-gray-400 mb-4">
           Subscribe to get notified when I publish new posts. No spam, unsubscribe anytime.
         </p>
         <Link
           to="/newsletter"
-          className="inline-flex items-center px-5 py-2.5 bg-primary hover:bg-primary-dark text-white text-sm font-medium rounded-lg transition-colors"
+          className="inline-flex items-center px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors"
         >
           Subscribe to newsletter
         </Link>
