@@ -1,0 +1,66 @@
+---
+title: "My Development Workflow in 2025"
+date: "2025-02-10"
+description: "After years of tweaking my setup, here's the development workflow and tooling stack that makes me productive and happy as a software engineer."
+tags: ["Productivity", "Tools", "Developer Experience"]
+readTime: "10 min read"
+published: true
+---
+
+Every developer's workflow is a living thing -- constantly evolving as new tools emerge and old habits get refined. After years of experimenting, I've settled into a setup that genuinely makes me more productive without adding unnecessary complexity. Here's what my development environment looks like in 2025.
+
+## Editor: Cursor
+
+I made the switch from VS Code to Cursor about a year ago, and it's been transformative. Cursor is built on VS Code, so all my extensions and muscle memory carry over, but the AI integration is on another level. Being able to chat with my codebase, get contextual completions that understand my project's patterns, and refactor code through natural language has fundamentally changed how I write software.
+
+That said, I keep my editor setup minimal. A clean theme (I use One Dark Pro), essential extensions only, and keyboard shortcuts for everything. The fewer distractions between my brain and the code, the better. My must-have extensions: ESLint, Prettier, Tailwind CSS IntelliSense, and GitLens.
+
+## Terminal: Ghostty + Zsh + Starship
+
+I use Ghostty as my terminal emulator. It's fast, GPU-accelerated, and has sensible defaults. For the shell, Zsh with a carefully curated set of plugins through Oh My Zsh: `git`, `z` (for directory jumping), `zsh-autosuggestions`, and `zsh-syntax-highlighting`.
+
+Starship is my prompt. It's written in Rust, so it's fast, and it shows me exactly the information I need: current directory, Git branch and status, Node version when relevant, and command duration for long-running processes.
+
+I've spent time creating shell aliases for common operations. `gs` for `git status`, `gp` for `git push`, `dev` for `pnpm dev`, and so on. Small optimizations, but they add up across thousands of daily commands.
+
+## Git Workflow
+
+I follow a simple branching strategy: `main` is always deployable, feature branches for new work, and pull requests for code review. I keep commits atomic and write descriptive commit messages using conventional commits format (`feat:`, `fix:`, `chore:`).
+
+Interactive rebase is my secret weapon for keeping history clean. Before opening a PR, I'll squash fixup commits, reorder for logical progression, and make sure each commit tells a clear story. It takes a few extra minutes but makes code review significantly easier.
+
+I use GitHub CLI (`gh`) extensively. Creating PRs, checking CI status, and reviewing code all from the terminal keeps me in flow.
+
+## Package Manager: pnpm
+
+I switched from npm to pnpm years ago and never looked back. The strict dependency resolution catches phantom dependency issues early. The content-addressable storage means `node_modules` across projects share packages, saving disk space. And it's just faster.
+
+`pnpm` workspaces handle monorepos elegantly when I need them. The lockfile format is more readable than npm's, which helps when resolving merge conflicts.
+
+## Testing Philosophy
+
+I believe in testing the right things at the right level. For most web applications, my testing pyramid looks like this:
+
+- **Unit tests** for pure business logic and utility functions (Vitest)
+- **Component tests** for complex UI components with significant logic (Testing Library)
+- **Integration tests** for critical user flows (Playwright)
+
+I don't chase 100% code coverage. Instead, I focus on testing behavior that matters: user-facing features, edge cases that have caused bugs before, and complex logic that's easy to get wrong. A well-placed integration test that covers an entire user flow is worth more than a dozen shallow unit tests.
+
+## AI Coding Tools
+
+AI has become an integral part of my workflow, but I use it deliberately. Claude Code is my primary AI assistant for larger tasks -- refactoring, generating boilerplate, exploring unfamiliar codebases, and rubber-ducking architectural decisions. Cursor's inline AI handles smaller, contextual tasks like writing implementations from type signatures or explaining unfamiliar code.
+
+The key insight I've had is that AI tools are most valuable when you can evaluate their output critically. Understanding the code well enough to know when the AI is wrong is what makes the tools productive rather than dangerous.
+
+## Time Management
+
+I protect my focus time aggressively. My calendar has two-hour blocks every morning marked as "Deep Work" where I tackle the hardest engineering problems. Meetings cluster in the afternoon. I batch Slack responses instead of responding in real time.
+
+The Pomodoro technique works well for tasks I'm procrastinating on. 25 minutes of focused work followed by a 5-minute break. For tasks I'm energized about, I just ride the flow and take breaks when natural stopping points come up.
+
+I keep a simple text file as my daily todo list. Three items maximum for the day. If I finish those, great. If not, the most important ones got done.
+
+## The Meta-Principle
+
+The common thread across all these choices is **reducing friction**. Every tool, alias, and workflow decision serves the same goal: minimize the distance between having an idea and seeing it work. When the tools get out of the way, you can focus on what actually matters -- solving problems and building things people use.
