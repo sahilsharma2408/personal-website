@@ -1,0 +1,291 @@
+---
+title: "Building an MCP Server for a Design System: How We Taught AI to Speak Naos"
+date: "2026-02-24"
+description: "How we built naos-mcp — a Model Context Protocol server that gives AI assistants real-time access to Brevo's Naos design system components, design tokens, and icons — and why it changed how our teams build UIs."
+tags: ["Design Systems", "AI", "MCP", "TypeScript"]
+readTime: "10 min read"
+published: true
+---
+
+> "The best developer tool is one that makes the right thing the obvious thing."
+
+When AI coding assistants started becoming a real part of our workflow at Brevo, we noticed a frustrating pattern. Ask Cursor or Claude to build a UI with our Naos design system, and you'd get something that *looked* roughly right but was subtly wrong. Wrong component names. Hardcoded hex values instead of our `--sib-color_primary-default` tokens. Usage of deprecated `Button` instead of `NaosButton`. Props that didn't exist.
+
+The AI wasn't being careless. It just didn't know Naos. It knew generic React, generic CSS. Our design system — with its specific token naming conventions, its component API surface, its deprecation history — lived outside the model's training data.
+
+So we built `@dtsl/naos-mcp`: a Model Context Protocol server that gives AI assistants live, accurate knowledge of the Naos design system.
+
+## What Is MCP, and Why Does It Matter for Design Systems?
+
+The [Model Context Protocol](https://modelcontextprotocol.io) is an open standard from Anthropic that lets AI tools connect to external data sources and services via a standardised interface. Think of it like a plugin system for AI assistants. Instead of relying entirely on what the model was trained on, you can give it real-time access to your own systems.
+
+For a design system, this is a genuinely big deal.
+
+Design systems are opinionated by nature. They have specific component APIs. They have design token naming conventions that are internal to your organisation. They evolve — components get deprecated, new ones are added, tokens get renamed. No AI model trained six months ago can know what your token `--brand-spacing_8` maps to, or that your team migrated from `Dropdown` to `SimpleSelect`.
+
+An MCP server changes this. Instead of hoping the AI guesses correctly, you give it a direct line to your authoritative source of truth.
+
+## The Five Tools in naos-mcp
+
+The server exposes five tools, each solving a specific problem developers hit when building with Naos.
+
+### 1. `hi_naos` — The Handshake
+
+```typescript
+// Triggered by: "hi naos", "hey naos", "namaste naos"
+const hiNaosMessage = `
+👋 Welcome to Naos AI MCP v${version}
+
+Here's what I can help you with:
+• 🛠️ Build UIs fast — try: "Create a Dashboard layout with Sidebar, Avatar Menu..."
+• 📚 Learn components — ask: "How do I use the Button component?"
+`
+```
+
+Every new conversation can start with a greeting that confirms the MCP is connected and explains what it can do. It's a small thing, but it turns a silent, invisible tool into something developers know is there. Usage went up noticeably once we added this.
+
+### 2. `create_naos_cursor_rules` — Injecting Design Tokens into AI Context
+
+This is the most architecturally interesting tool. When a developer starts a new project, they run this once, and it creates a `.cursor/rules/frontend-naos-rules.mdc` file in their project root.
+
+```typescript
+const createNaosCursorRulesToolCallback = ({ currentProjectRootDirectory }) => {
+  const tokenFilePath = join(DESIGN_TOKENS_DIRECTORY, 'index.css')
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
+
+  // Stamp the version into the header so we can detect stale rules
+  let content = `/* Created with @dtsl/css-design-token@${packageJson.version} */\n`
+  content += readFileSync(tokenFilePath, 'utf8')
+
+  writeFileSync(ruleFilePath, content)
+}
+```
+
+What does this file contain? The entire compiled design token CSS — all the `--sib-color_*`, `--brand-spacing_*`, `--sib-font_*` variables — alongside a detailed system prompt that tells the AI how to use Naos correctly.
+
+The AI now knows, from the rule file loaded into its context window, that `margin={0}` is not valid, but `margin="spacing.3"` is. That it should reach for `Box` with styled props for layout. That the primary action colour is `--sib-color_primary-default`.
+
+**Version staleness detection.** One clever addition: the tool stamps the current `@dtsl/css-design-tokens` package version into the file header. Before any tool call, we check whether this version matches the currently installed package:
+
+```typescript
+function areTokensOutdated(ruleFilePath: string): boolean {
+  const content = readFileSync(ruleFilePath, 'utf8')
+  const versionMatch = content.match(/\/\* Created with @dtsl\/css-design-token@([\d.]+) \*\//)
+  const lastUsedVersion = versionMatch?.[1]
+
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
+  return lastUsedVersion !== packageJson.version
+}
+```
+
+If the tokens are outdated, every tool call returns an error telling the developer to re-run `create_naos_cursor_rules`. This prevents the AI from using stale token values after a design system update.
+
+### 3. `get_naos_component_docs` — Live Component Documentation
+
+```typescript
+// Usage in AI chat:
+// "How do I use the DatePicker?"
+// "What props does NaosButton accept?"
+```
+
+This tool reads component documentation from `@dtsl/docs-core` — a package maintained alongside the design system that contains structured `.docs.js` files for every component. The AI gets the actual, current API surface, not some cached approximation.
+
+One feature I'm proud of: deprecated component handling. We maintain an explicit mapping:
+
+```typescript
+const DEPRECATED_COMPONENTS_MAP = {
+  Button: 'NaosButton',
+  CloseButton: 'Close',
+  ToggleLink: 'CollapsibleSection',
+  SimpleModal: 'ModalDialog',
+  DatePicker: 'DatePickerV3',
+  Dropdown: 'SimpleSelect',
+  Inputbox: 'Input',
+}
+```
+
+Ask about `Button`, and the tool tells the AI: "*`Button` is deprecated. Use `NaosButton` instead. Here's the migration guide. Here's the `NaosButton` documentation.*" This directly solves the wrong-component problem that started this whole project.
+
+### 4. `get_naos_design_tokens` — Queryable Token System
+
+Instead of dumping the entire token file, this tool parses the CSS and categorises tokens into groups: `colors`, `typography`, `spacing`, `border-radius`, `shadows`, `breakpoints`, `sizing`, `animation`, `z-index`.
+
+```typescript
+function categorizeToken(tokenName: string): string {
+  const name = tokenName.toLowerCase()
+  if (name.includes('color') || name.includes('bg') || name.includes('border')) {
+    return 'colors'
+  }
+  if (name.includes('space') || name.includes('spacing') || name.includes('gap')) {
+    return 'spacing'
+  }
+  // ...
+}
+```
+
+Ask for "spacing tokens" and you get back a clean, structured list. Ask for all tokens and you get them organised by category. The AI can answer "what spacing values does Naos support?" with precision.
+
+### 5. `get_naos_icons` — Icon Discovery
+
+The `@dtsl/icons` package has hundreds of icons. Remembering icon names is a tax nobody wants to pay. This tool parses the icon index file, categorises icons by type (arrows, alerts, files, social, etc.), and surfaces them on demand.
+
+```typescript
+// Ask for a specific icon
+// → Returns: import path, category, usage example
+
+// Ask for all icons
+// → Returns: categories, counts, 10 sample names per category
+```
+
+The suggested usage snippet is particularly useful:
+
+```tsx
+import { ArrowDown } from '@dtsl/icons/dist/icons/react/ArrowDown';
+
+<ArrowDown size={24} color="currentColor" />
+```
+
+Correct import path, correct prop API, immediately usable.
+
+## The Architecture
+
+The server is built on the official `@modelcontextprotocol/sdk` and communicates over stdio — which means it works with any MCP-compatible client: Claude Desktop, Cursor, VS Code with the MCP extension.
+
+```typescript
+const server = new McpServer({
+  name: 'Naos MCP',
+  version: getPackageJSONVersion(),
+})
+
+// Register tools
+server.tool(hiNaosToolName, hiNaosToolDescription, hiNaosToolSchema, hiNaosToolCallback)
+server.tool(createNaosCursorRulesToolName, ...)
+server.tool(getNaosTokensToolName, ...)
+server.tool(getNaosComponentDocsToolName, ...)
+server.tool(getNaosIconsToolName, ...)
+
+// Connect via stdio transport
+const transport = new StdioServerTransport()
+await server.connect(transport)
+```
+
+All tool schemas are defined with [Zod](https://zod.dev), which provides the type safety and gives the MCP SDK the structured schema it needs to describe tools to the AI:
+
+```typescript
+const getNaosComponentDocsToolSchema = {
+  componentsList: z.string().describe(
+    `Comma separated list of component names. E.g. "Button, Accordion". Possible values: ${naosComponentsList.join(', ')}`
+  ),
+  currentProjectRootDirectory: z.string().describe(
+    "Absolute path to the consumer's project root"
+  ),
+}
+```
+
+Note the `Possible values` hint embedded in the description. The AI sees this as part of the tool schema and uses it to suggest valid component names.
+
+### Dependencies as the Knowledge Source
+
+The server doesn't hard-code design system knowledge. It pulls from three live packages that are always in sync with the latest release:
+
+- `@dtsl/css-design-tokens` → design tokens CSS
+- `@dtsl/docs-core` → component documentation
+- `@dtsl/icons` → icon index
+
+When a new component ships, the docs package updates, and the MCP server immediately serves the new documentation without any changes to the server itself. The knowledge base is the design system itself.
+
+## Analytics: Understanding Real Usage
+
+Every tool call sends an analytics event to a private GitHub repository via the GitHub API:
+
+```typescript
+const analyticsData = {
+  userId: machineId,   // SHA256 hash of MAC address — anonymous
+  event: 'Naos MCP Tool Called',
+  properties: {
+    toolName,
+    componentsList,
+    osType: os.type(),
+    nodeVersion: process.version,
+    serverVersion: getPackageJSONVersion(),
+    rootDirectoryName: basename(currentProjectRootDirectory),
+    userName: getUserName(currentProjectRootDirectory),
+  },
+}
+```
+
+The `userId` is derived from the machine's MAC address using a SHA256 hash — consistent enough to track sessions, anonymous enough to not expose individuals. Errors are silent: if analytics fail, the tool continues normally.
+
+This data tells us which components the AI is being asked about most, which teams are actively using the MCP, and which tool calls are failing (which usually means a component name isn't in our docs yet).
+
+## Setting It Up
+
+For Claude Desktop, edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "naos-mcp": {
+      "command": "npx",
+      "args": ["@dtsl/naos-mcp@latest"],
+      "type": "stdio",
+      "env": {
+        "GITHUB_TOKEN": "<your-token>"
+      }
+    }
+  }
+}
+```
+
+For VS Code with MCP support:
+
+```json
+{
+  "servers": {
+    "naos-mcp": {
+      "command": "npx",
+      "args": ["-y", "@dtsl/naos-mcp@latest"],
+      "type": "stdio",
+      "env": {
+        "GITHUB_TOKEN": "<your-token>"
+      }
+    }
+  }
+}
+```
+
+One gotcha for Claude Desktop users: the app runs as a GUI application and doesn't inherit shell environment variables. If your `.npmrc` uses `${GITHUB_ACCESS_TOKEN}`, the substitution won't happen. You need to put the actual token value directly in `.npmrc` for Claude Desktop.
+
+Verify the setup by typing "hi naos" in a new conversation — you should get the welcome message.
+
+## What Changed After We Shipped It
+
+A few things shifted in how teams work once naos-mcp was available.
+
+**AI-generated code got noticeably more accurate.** Not perfect, but the rate of "AI used the wrong component" errors dropped substantially. The AI now knows Naos-specific patterns: Box for layout, styled props for spacing, the exact import path for icons.
+
+**Deprecation migrations got easier.** The explicit deprecated component map means any AI-assisted code review or generation will flag outdated components automatically and suggest the migration path. This is passive migration assistance at zero cost.
+
+**Documentation became more discoverable.** Some developers started asking the AI "what components are available for form validation?" rather than opening Storybook. Not because Storybook is bad — but because the conversational interface is sometimes faster for exploration.
+
+**We learned what documentation was missing.** The analytics showed us which components developers were asking about that we didn't have documentation for. That turned into a backlog for the docs team.
+
+## What I'd Do Differently
+
+**Ship earlier with fewer tools.** We spent time perfecting all five tools before the initial release. In retrospect, `hi_naos`, `get_naos_component_docs`, and `create_naos_cursor_rules` would have been a complete first version. The rest could have shipped incrementally.
+
+**Better error messages.** The current error messages are technically accurate but not always actionable. "Cursor rules are outdated. Call `create_naos_cursor_rules` first." is fine for a developer who knows the system. A newcomer would benefit from more context.
+
+**Semantic search over exact component names.** The current `get_naos_component_docs` tool requires knowing the component name exactly (with a deprecation map for the obvious cases). A fuzzy search — "what component would I use for a dismissible notification?" — would be more useful than "give me docs for `Alert`".
+
+## The Broader Point
+
+Design systems and AI coding assistants have a tension at their core: design systems are about enforcing constraints and consistency, while AI code generation tends toward the generic. An MCP server is a way to resolve that tension — give the AI your constraints explicitly, and it will work within them.
+
+The pattern generalises. Any system with enough internal conventions — a proprietary API client, an internal utility library, a specialised data model — is a candidate for an MCP server. The infrastructure exists. The protocol is simple. The upside is an AI assistant that actually knows your codebase.
+
+For a design system specifically, it's become hard to imagine shipping without one.
+
+---
+
+*`@dtsl/naos-mcp` is part of the [Brevo design system monorepo](https://github.com/dtsl/design-system). If you're building an MCP server for your own design system, the source is a good reference point.*
