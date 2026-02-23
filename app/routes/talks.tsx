@@ -1,4 +1,5 @@
 import type { MetaFunction } from "react-router";
+import { talks } from "~/data/talks";
 
 export const meta: MetaFunction = () => [
   { title: "Talks | Sahil Sharma" },
@@ -15,59 +16,6 @@ const TAG_COLORS: Record<string, string> = {
   dx: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",
 };
 
-const talks = [
-  {
-    title: "Modern Full-Stack Development with React Router v7",
-    event: "React Conf India 2024",
-    eventUrl: "#",
-    date: "November 2024",
-    description: "A deep dive into React Router v7's new paradigm for full-stack React apps — covering file-based routing, server-side rendering, data loading patterns, and deployment to Cloudflare edge.",
-    tags: ["react", "cloudflare"],
-    youtubeUrl: null,
-    slidesUrl: "#",
-  },
-  {
-    title: "Testing React Applications in 2024",
-    event: "JSConf Asia 2024",
-    eventUrl: "#",
-    date: "September 2024",
-    description: "Practical strategies for testing React apps with Vitest and Playwright. From unit tests to end-to-end flows — building confidence without slowing down your team.",
-    tags: ["testing", "react"],
-    youtubeUrl: "#",
-    slidesUrl: "#",
-  },
-  {
-    title: "TypeScript Patterns for React Developers",
-    event: "TypeScript India Meetup",
-    eventUrl: "#",
-    date: "June 2024",
-    description: "Practical TypeScript patterns that make React development safer and more enjoyable — generics, discriminated unions, template literal types, and the utility types you'll actually use.",
-    tags: ["typescript", "react"],
-    youtubeUrl: "#",
-    slidesUrl: "#",
-  },
-  {
-    title: "Developer Experience Matters",
-    event: "DevFest 2023",
-    eventUrl: "#",
-    date: "December 2023",
-    description: "Why investing in developer experience pays dividends. Tooling, linting, testing infrastructure, and culture decisions that make teams fast and keep engineers happy.",
-    tags: ["dx"],
-    youtubeUrl: null,
-    slidesUrl: "#",
-  },
-  {
-    title: "Building for the Edge: Cloudflare Workers in Practice",
-    event: "CloudNative Day 2023",
-    eventUrl: "#",
-    date: "October 2023",
-    description: "Moving compute to the edge sounds great in theory — this talk covers the reality: cold starts, KV storage, D1 databases, and the gotchas you need to know before deploying.",
-    tags: ["cloudflare", "performance"],
-    youtubeUrl: "#",
-    slidesUrl: "#",
-  },
-];
-
 export default function Talks() {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16">
@@ -80,7 +28,7 @@ export default function Talks() {
         </p>
         <p className="mt-3 text-sm text-gray-500 dark:text-gray-500">
           Want me to speak at your event?{" "}
-          <a href="mailto:sahilsharma2408@gmail.com" className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
+          <a href="mailto:ss2408.inbox@gmail.com" className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium">
             Get in touch.
           </a>
         </p>
@@ -109,9 +57,13 @@ export default function Talks() {
                   {talk.title}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  <a href={talk.eventUrl} className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-medium">
-                    {talk.event}
-                  </a>
+                  {talk.eventUrl ? (
+                    <a href={talk.eventUrl} className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-medium">
+                      {talk.event}
+                    </a>
+                  ) : (
+                    <span className="font-medium">{talk.event}</span>
+                  )}
                   <span className="mx-2 text-gray-300 dark:text-gray-700">·</span>
                   <time>{talk.date}</time>
                 </p>

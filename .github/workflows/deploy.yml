@@ -35,6 +35,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: sahil-personal-website
+          projectName: sahil-website
           directory: build/client
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}

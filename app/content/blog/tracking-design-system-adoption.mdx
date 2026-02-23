@@ -1,0 +1,165 @@
+---
+title: "How to Track Design System Adoption Across Your Organisation"
+date: "2023-04-28"
+description: "Building an automated pipeline — GitHub Actions + React Scanner + Metabase — to measure which teams use our Indigo design system components and identify where adoption is lagging."
+tags: ["Design Systems", "React", "Analytics"]
+readTime: "7 min read"
+published: true
+---
+
+A year after launching Indigo, our design system at Sendinblue, we had a problem that felt like a good problem: over 25 projects had adopted it. But we had no idea which components they were actually using.
+
+Were teams using the new `Button` component or still relying on their own implementations? Were they on the latest package version or three major versions behind? Which components were working so well that teams reached for them constantly? Which ones were being ignored — and why?
+
+We didn't know. And without data, we couldn't make good decisions about what to build next or which teams needed help migrating.
+
+So we built a tracker.
+
+## Why Tracking Adoption Is Hard
+
+The naive solution is to ask teams. Send a survey, get responses, aggregate manually. This works once. It doesn't scale, it goes stale immediately, and it relies on developers accurately self-reporting usage (they won't).
+
+The right solution is to make it automatic. Parse the code, don't ask about it.
+
+Here's the tricky part: we had 25+ repositories, each owned by a different team, running their own CI/CD pipelines. We needed a way to scan all of them on a regular schedule, aggregate the results, and make the data visible to everyone who needed it.
+
+## The Architecture
+
+We settled on four tools:
+
+- **React Scanner** — an npm package that statically analyses React codebases and reports which components are used, how many times, and with what props
+- **GitHub Actions** — to run the scanning pipeline on a monthly schedule
+- **Prisma** — to push the results to a database
+- **Metabase** — to visualise and explore the data
+
+Here's how the four-job pipeline works:
+
+### Job 1: Build the Repository Matrix
+
+We maintain a list of all frontend repositories that should be tracked. Job 1 reads this list and outputs it as a matrix variable that GitHub Actions can use to fan out work in parallel.
+
+```yaml
+build-matrix:
+  runs-on: ubuntu-latest
+  outputs:
+    matrix: ${{ steps.set-matrix.outputs.matrix }}
+  steps:
+    - id: set-matrix
+      run: echo "matrix=$(cat repos.json)" >> $GITHUB_OUTPUT
+```
+
+### Job 2: Clone and Upload Repositories
+
+Using the matrix strategy, GitHub Actions clones all repositories asynchronously — one job per repo, running in parallel. Each clone is uploaded as an artifact.
+
+```yaml
+clone-repos:
+  needs: build-matrix
+  strategy:
+    matrix: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
+  steps:
+    - name: Clone repo
+      run: git clone --depth 1 ${{ matrix.repo_url }} repo-${{ matrix.repo_name }}
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: repo-${{ matrix.repo_name }}
+        path: repo-${{ matrix.repo_name }}
+```
+
+Shallow clones (`--depth 1`) keep this fast — we only need the current state, not the full history.
+
+### Job 3: Scan with React Scanner
+
+Once all repos are cloned, Job 3 downloads each artifact and runs React Scanner against it. The output is a JSON report of every component instance found.
+
+```bash
+npx react-scanner -c scanner.config.js ./repo-projectA
+```
+
+A minimal React Scanner config:
+
+```js
+// scanner.config.js
+module.exports = {
+  crawlFrom: './',
+  includeSubComponents: true,
+  importedFrom: /@indigo\/react/,  // only track Indigo components
+  processors: [
+    ['count-components-and-props', { outputTo: './report.json' }],
+  ],
+};
+```
+
+The `importedFrom` filter is key — it ensures we're only counting components imported from our design system package, not lookalike components teams may have built themselves.
+
+### Job 4: Push to Metabase
+
+The final job collects all the JSON reports, transforms them, and pushes to a Metabase database via Prisma. Each monthly run creates a snapshot, so we can track trends over time.
+
+```ts
+// Push component usage data to the database
+await prisma.componentUsage.createMany({
+  data: reports.flatMap(({ repo, components }) =>
+    Object.entries(components).map(([name, count]) => ({
+      repo,
+      componentName: name,
+      count,
+      scanDate: new Date(),
+    }))
+  ),
+});
+```
+
+## What We Measure
+
+With the data in Metabase, we built five dashboards:
+
+### 1. Total Indigo Component Instances (Trend)
+
+A line chart showing total component usage across the org over time. An upward trend means adoption is growing. A plateau means we've hit saturation and need to focus on depth (component quality) rather than breadth (new adopters). A downward trend is a red flag.
+
+### 2. Components Per Project
+
+A breakdown of how many Indigo components each project uses. Projects using 2-3 components are early adopters who might need support. Projects using 30+ are power users — talk to them, learn what's working.
+
+### 3. Indigo vs. Legacy Component Ratio
+
+For each project, the ratio of Indigo components to custom/legacy components. This is the migration progress metric — the goal is to move that ratio toward 1.0 over time.
+
+### 4. Component Popularity
+
+Ranked list of most and least used components. This is product intelligence for the design system team. If `Button` is used 2,000 times but `DataTable` is used 8 times, that tells you something about where to invest.
+
+### 5. Package Versions in Use
+
+Which version of `@indigo/react` each project is on. Version fragmentation is a maintenance risk — teams on old versions miss bug fixes and security patches. This dashboard makes it visible and creates a natural conversation starter with teams that are behind.
+
+## What We Learned
+
+**Automated tracking changed the conversation.** Before, design system discussions were opinion-based. Now we bring data. "Teams are barely using the `Alert` component — let's understand why" is a more productive conversation than "I feel like adoption is low."
+
+**The popular components weren't always the ones we expected.** `Badge` and `Tag` were used far more than we anticipated. `Modal` was used far less. That informed our next quarter's roadmap.
+
+**Version lag is worse than it looks.** When we first pulled the version data, we found projects two to three major versions behind. Some had been blocked by a breaking change for months and just lived with it. That's a failure mode for the design system team — we needed better migration guides and codemods.
+
+**Monthly is the right cadence.** Weekly would be noise. Quarterly would be too slow to catch regressions. Monthly snapshots give you enough resolution to see trends without the overhead of interpreting daily fluctuations.
+
+## Setting This Up Yourself
+
+The full pipeline runs in under 10 minutes for 25 repositories. Here's the minimum you need to get started:
+
+1. A list of repositories to scan
+2. React Scanner configured to track your design system's package name
+3. A GitHub Actions workflow with a `schedule` trigger (`cron: '0 9 1 * *'` for the 1st of every month)
+4. Somewhere to store the results — even a CSV committed to a repo is a start
+
+Don't let perfect be the enemy of useful. Start with a simple script that outputs a text report. Automate it. Share the results. The sophistication can come later.
+
+## Conclusion
+
+A design system without adoption data is flying blind. You can build great components and still have teams avoiding them, staying on old versions, or reimplementing things from scratch — and you won't know until it's a significant problem.
+
+The pipeline we built took a few weeks of engineering time and has paid back that investment many times over in better prioritisation, faster migrations, and more productive conversations with product teams.
+
+If you're maintaining a design system at any serious scale, track adoption. Make it automated. Make the data visible. The system will get better because of it.

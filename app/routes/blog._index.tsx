@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLoaderData } from "react-router";
 import { getAllPosts } from "~/lib/blog.server";
 
-const ALL_TAGS = ["All", "React", "Cloudflare", "TypeScript", "Productivity"];
+const ALL_TAGS = ["All", "Design Systems", "Performance", "Cloudflare", "React", "DevOps"];
 
 const TAG_COLORS: Record<string, string> = {
   React: "bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400",
@@ -10,10 +10,20 @@ const TAG_COLORS: Record<string, string> = {
   TypeScript: "bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400",
   Cloudflare: "bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400",
   DevOps: "bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400",
+  Frontend: "bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400",
+  Performance: "bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400",
+  "Design Systems": "bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-400",
+  Analytics: "bg-teal-100 dark:bg-teal-500/20 text-teal-700 dark:text-teal-400",
   Productivity: "bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400",
-  Tools: "bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400",
-  "Developer Experience": "bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-400",
 };
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
 
 export function meta() {
   return [
@@ -21,7 +31,7 @@ export function meta() {
     {
       name: "description",
       content:
-        "Thoughts on web development, React, and building things.",
+        "Writing on design systems, frontend architecture, performance, and developer experience.",
     },
   ];
 }
@@ -33,26 +43,43 @@ export async function loader() {
 export default function BlogIndex() {
   const { posts } = useLoaderData<typeof loader>();
   const [activeTag, setActiveTag] = useState("All");
+  const [query, setQuery] = useState("");
 
-  const filteredPosts =
-    activeTag === "All"
-      ? posts
-      : posts.filter((post) =>
-          post.frontmatter.tags.some((tag) =>
-            tag.toLowerCase().includes(activeTag.toLowerCase())
-          )
-        );
+  const filtered = posts.filter((post) => {
+    const matchesTag =
+      activeTag === "All" ||
+      post.frontmatter.tags.some((t) =>
+        t.toLowerCase().includes(activeTag.toLowerCase())
+      );
+    const matchesQuery =
+      query.trim() === "" ||
+      post.frontmatter.title.toLowerCase().includes(query.toLowerCase()) ||
+      post.frontmatter.description.toLowerCase().includes(query.toLowerCase());
+    return matchesTag && matchesQuery;
+  });
 
   return (
     <div className="bg-white dark:bg-gray-950 min-h-screen">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16">
-        <div className="mb-12">
+        {/* Header */}
+        <div className="mb-10">
           <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-900 dark:text-white mb-4">
             Blog
           </h1>
-          <p className="text-lg text-gray-600 dark:text-gray-400">
-            Thoughts on web development, React, and building things.
+          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl">
+            Writing on design systems, frontend architecture, performance, and developer experience.
           </p>
+        </div>
+
+        {/* Search */}
+        <div className="mb-8">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search articles…"
+            className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 px-5 py-3 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors"
+          />
         </div>
 
         {/* Tag filters */}
@@ -72,39 +99,39 @@ export default function BlogIndex() {
           ))}
         </div>
 
+        <p className="text-sm text-gray-500 dark:text-gray-500 mb-8">
+          {filtered.length} {filtered.length === 1 ? "article" : "articles"}
+        </p>
+
         {/* Post list */}
-        {filteredPosts.length > 0 ? (
-          <div className="space-y-8">
-            {filteredPosts.map((post) => (
-              <article
+        {filtered.length > 0 ? (
+          <div className="space-y-1">
+            {filtered.map((post) => (
+              <Link
                 key={post.slug}
-                className="group border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 rounded-xl p-6 hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-sm transition-all"
+                to={`/blog/${post.slug}`}
+                className="group block rounded-2xl p-6 hover:bg-gray-50 dark:hover:bg-gray-900/60 transition-colors"
               >
-                <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500 dark:text-gray-500 mb-3">
+                {/* Date + read time */}
+                <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-gray-500 mb-2">
                   <time dateTime={post.frontmatter.date}>
-                    {new Date(post.frontmatter.date).toLocaleDateString(
-                      "en-US",
-                      {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                      }
-                    )}
+                    {formatDate(post.frontmatter.date)}
                   </time>
                   <span aria-hidden="true">&middot;</span>
                   <span>{post.frontmatter.readTime}</span>
                 </div>
 
-                <Link to={`/blog/${post.slug}`} className="block mb-3">
-                  <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                    {post.frontmatter.title}
-                  </h2>
-                </Link>
+                {/* Title */}
+                <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors mb-2 leading-snug">
+                  {post.frontmatter.title}
+                </h2>
 
-                <p className="text-gray-600 dark:text-gray-400 mb-4 leading-relaxed">
+                {/* Description */}
+                <p className="text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
                   {post.frontmatter.description}
                 </p>
 
+                {/* Tags */}
                 <div className="flex flex-wrap gap-2">
                   {post.frontmatter.tags.map((tag) => (
                     <span
@@ -118,19 +145,22 @@ export default function BlogIndex() {
                     </span>
                   ))}
                 </div>
-              </article>
+              </Link>
             ))}
           </div>
         ) : (
           <div className="text-center py-16">
             <p className="text-gray-500 dark:text-gray-400 text-lg">
-              No posts found for "{activeTag}".
+              No articles match "{activeTag !== "All" ? activeTag : query}".
             </p>
             <button
-              onClick={() => setActiveTag("All")}
+              onClick={() => {
+                setActiveTag("All");
+                setQuery("");
+              }}
               className="mt-4 text-indigo-600 dark:text-indigo-400 hover:underline"
             >
-              View all posts
+              Clear filters
             </button>
           </div>
         )}

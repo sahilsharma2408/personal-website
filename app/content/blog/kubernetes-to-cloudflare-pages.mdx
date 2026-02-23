@@ -1,0 +1,113 @@
+---
+title: "How We Migrated 30+ Frontend Apps from Kubernetes to Cloudflare Pages"
+date: "2022-08-05"
+description: "Why we were running frontend SPAs on Kubernetes, why that was a mistake, and how moving to Cloudflare Pages cut our build times by 60% and made everyone's life easier."
+tags: ["Cloudflare", "DevOps", "Frontend"]
+readTime: "7 min read"
+published: true
+---
+
+Here's a thing that sounds reasonable until you really think about it: running single-page applications on Kubernetes.
+
+We had 30+ SPAs — React apps that compile down to a `dist/` folder of HTML, CSS, and JavaScript. Static assets. And we were deploying them through Docker containers, Kubernetes pods, CPU and memory allocations, the whole thing. A DevOps engineer had to be involved every time we wanted to ship a frontend change.
+
+At some point, someone said out loud: "Why are we doing this?" We didn't have a good answer.
+
+That was the beginning of our migration to Cloudflare Pages.
+
+## The Problem with Kubernetes for Static Frontend
+
+Let me be clear — Kubernetes is fantastic for what it's designed for. Stateful services, dynamic workloads, microservices that need to scale independently. None of those things describe a React app.
+
+Our deployment process for a frontend change looked like this:
+
+1. Write code
+2. Create a Docker configuration
+3. Provision pods with CPU and memory
+4. Set up a dedicated environment per developer
+5. Pipe it through Travis, then Jenkins, then Kubernetes
+6. Wait 6-7 minutes for the build to complete
+
+That's a lot of infrastructure for something that is, at its core, just files.
+
+The pain was real. Developers had to coordinate with DevOps for environment setup. Build pipelines were slow. Preview environments for testing pull requests were a manual process. We were spending engineering time on infrastructure problems that a CDN could solve for free.
+
+## Evaluating Alternatives
+
+We looked at four options:
+
+### Vercel
+Already used by some teams internally. The experience is excellent, but the pricing at our scale was a concern. We didn't want to consolidate on a platform we might need to move off later.
+
+### Netlify
+This was the obvious choice on paper, and we got quite far with evaluation. Then we hit two dealbreakers:
+
+1. **No custom domain previews.** Branch previews used `.netlify.app` subdomains. We needed previews on our own domain (`feature-xyz–projectA.pages.sendinblue.dev`) for testing with authentication and staging APIs.
+2. **No built-in access control.** Protecting preview deployments required integrating Okta — another dependency, more configuration, more things to break.
+
+### S3 + CloudFront
+Technically sound, but the operational overhead was high. We'd be trading one maintenance burden for another.
+
+### Cloudflare Pages
+We were already deep in the Cloudflare ecosystem — DNS, WAF, DDoS protection, Workers. Using Cloudflare Pages meant one less vendor to manage, and the enterprise relationship made pricing straightforward.
+
+Cloudflare Pages solved both of the Netlify dealbreakers. And the Cloudflare Workers integration meant we could solve the custom domain preview problem ourselves.
+
+## How We Solved Custom Domain Previews
+
+Every Cloudflare Pages project gets a branch alias URL — something like `feat-new-header.projecta.pages.dev`. That's useful, but not on our domain.
+
+We built Cloudflare Workers that proxy requests from our custom subdomain scheme (`feature-xyz–projectA.pages.sendinblue.dev`) to the corresponding Cloudflare Pages alias. It's a simple worker:
+
+```js
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    // Map custom subdomain to Cloudflare Pages alias
+    const pagesUrl = mapToPagesAlias(url.hostname);
+    return fetch(new Request(pagesUrl + url.pathname, request));
+  },
+};
+```
+
+This gave us branch previews on our own domain, with our DNS and access controls, without any third-party auth dependency.
+
+## The New Deployment Workflow
+
+After migration, shipping a frontend change looks like this:
+
+1. Write code
+2. Push to GitHub
+3. Open a pull request → Cloudflare Pages automatically creates a preview deployment
+4. Test on staging data (no local infrastructure needed)
+5. Merge to `dev` → automatically deploys to staging
+6. Merge to `main` → deploys to production
+
+No DevOps coordination. No Docker configuration. No pod allocation. A developer can go from code to production without leaving GitHub.
+
+The build time dropped from **6-7 minutes to 2-3 minutes**. That might not sound dramatic, but multiplied across 30+ apps and dozens of deploys per day, it adds up to hours recovered every week.
+
+## Rollback in One Click
+
+This was a quiet win that people appreciated once they experienced it. In the old system, rolling back meant reverting a commit, triggering a new build, waiting, and hoping. On Cloudflare Pages, every deployment is preserved. You pick a previous deployment, click "Rollback," done. Back to a known-good state in seconds.
+
+The confidence this gives teams to ship frequently is hard to overstate.
+
+## Known Limitations
+
+I want to be honest about the rough edges we hit:
+
+- **No tagging system.** Production deploys are tied to the main branch. There's no concept of a tagged release — if you merge to main, it ships.
+- **Environment variables per-project.** There's no global default for env vars; each project needs its own configuration. For 30+ projects, that's tedious to maintain.
+- **DNS mapping is manual.** Associating branch aliases to custom domains still requires some dashboard work. We partially automated this with the Cloudflare API, but it's not zero-touch.
+- **Web analytics don't work for proxied requests.** The Cloudflare Pages analytics don't capture traffic routed through Workers proxies. We compensate with our own analytics tooling.
+
+None of these are blockers. They're tradeoffs we accepted in exchange for everything we gained.
+
+## The Takeaway
+
+If you're running static frontend applications on container infrastructure, you're probably paying an operational tax you don't need to pay.
+
+A CDN-native deployment platform for SPAs isn't just convenient — it changes the relationship between frontend engineers and infrastructure. Developers own their deploys. Preview environments are automatic. Rollbacks are instant. The DevOps team gets their attention back for work that actually requires it.
+
+We migrated 30+ applications over a few months. In hindsight, we should have done it sooner.

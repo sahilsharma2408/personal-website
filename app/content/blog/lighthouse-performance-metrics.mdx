@@ -1,0 +1,144 @@
+---
+title: "Lighthouse Scores from 69 to 89: What We Did Across 40+ Pages"
+date: "2022-10-13"
+description: "A six-month performance sprint across 40+ frontend applications — the four metrics we focused on, the techniques that moved the needle, and the monitoring setup that keeps us from sliding back."
+tags: ["Performance", "Frontend", "React"]
+readTime: "8 min read"
+published: true
+---
+
+Our average Lighthouse score was 69. That's a C grade. Not terrible enough to trigger an emergency, but bad enough that real users were feeling it — longer load times, more layout shifts, sluggish interactions.
+
+We set a target of 90+ and gave ourselves six months. Here's what happened.
+
+## The Starting Point
+
+We had roughly 40 frontend pages spread across a mix of single-page applications and a legacy monolithic app. The monolithic app was the bigger challenge — millions of weekly traffic events, years of accumulated JavaScript, and a codebase that pre-dated modern performance tooling.
+
+Before writing a single line of code, we needed to understand what was actually costing us points. Lighthouse breaks its performance score down into weighted metrics. In Lighthouse 8, the weights look like this:
+
+| Metric | Weight |
+|--------|--------|
+| Total Blocking Time (TBT) | 30% |
+| Largest Contentful Paint (LCP) | 25% |
+| Cumulative Layout Shift (CLS) | 15% |
+| First Contentful Paint (FCP) | 10% |
+| Speed Index | 10% |
+| Time to Interactive | 10% |
+
+Four metrics account for 80% of the score. That's where we focused.
+
+## The Four Metrics — and What Moves Them
+
+### First Contentful Paint (FCP) — Target: under 1.8s
+
+FCP measures when the first piece of content appears on screen. The enemy here is render-blocking resources — CSS and JavaScript that the browser has to download and parse before it can paint anything.
+
+What worked for us:
+
+- **Inline critical CSS** — the styles needed for above-the-fold content go inline in the `<head>`. Everything else loads asynchronously.
+- **Defer non-critical scripts** — any JavaScript that doesn't affect the initial render gets `defer` or `async` attributes.
+- **Split stylesheets by media type** — stylesheets for `print` or `(min-width: 1024px)` don't block the initial render on mobile.
+
+### Largest Contentful Paint (LCP) — Target: under 2.5s
+
+LCP measures when the largest visible element loads. For most pages, that's a hero image or a large heading. Common culprits: unoptimised images, slow server response times, render-blocking resources delaying the critical path.
+
+Our fixes:
+
+```html
+<!-- Preload the LCP image -->
+<link rel="preload" as="image" href="/hero.webp" />
+
+<!-- Use WebP with a fallback -->
+<picture>
+  <source srcset="/hero.webp" type="image/webp" />
+  <img src="/hero.jpg" alt="Hero" loading="eager" />
+</picture>
+```
+
+We also switched from gzip to **Brotli compression** across all static assets. Brotli typically achieves 15-20% better compression ratios than gzip for text assets. Over a large bundle, that's meaningful.
+
+### Total Blocking Time (TBT) — Target: under 200ms
+
+TBT is the sum of time during which the main thread was blocked long enough to prevent input response. Long tasks (tasks over 50ms) are the culprit — heavy JavaScript evaluation, unoptimised event handlers, synchronous DOM operations.
+
+This was our biggest problem, and the hardest to fix.
+
+The most impactful change was **code splitting**. Shipping one massive JavaScript bundle means the browser parses all of it before the user can interact with anything. With code splitting, users only download the code for the current route:
+
+```js
+// Before: everything in one bundle
+import HeavyDashboard from './HeavyDashboard';
+
+// After: load it only when needed
+const HeavyDashboard = React.lazy(() => import('./HeavyDashboard'));
+```
+
+We also audited our third-party scripts. Analytics, chat widgets, A/B testing tools — each one adds to main thread time. Some we deferred. Some we removed entirely after discovering they were unused.
+
+### Cumulative Layout Shift (CLS) — Target: under 0.1
+
+CLS measures visual stability — how much content unexpectedly moves around as the page loads. If you've ever started reading an article and then an ad loads above it, shifting everything down — that's layout shift.
+
+Two main causes in our codebase:
+
+**Web fonts loading without a fallback.** When a custom font loads, the browser switches from the system font, causing a reflow. The fix:
+
+```css
+@font-face {
+  font-family: 'Publico';
+  font-display: swap; /* Use system font until Publico loads */
+  src: url('/fonts/publico.woff2') format('woff2');
+}
+```
+
+**Images without explicit dimensions.** When an image loads and the browser doesn't know its size, the layout reflows around it. Always set width and height:
+
+```html
+<img src="/product.jpg" width="800" height="600" alt="Product" loading="lazy" />
+```
+
+## Monitoring: Keeping the Gains
+
+Here's the thing about performance work — it decays. You make improvements, ship them, and then over the next few months new features gradually push scores back down. Without monitoring, you don't notice until it's bad again.
+
+We set up two layers of monitoring:
+
+### Elastic RUM (Real User Monitoring)
+
+Lighthouse is a lab test — it simulates a single user on a controlled connection. RUM captures real performance data from real users on real devices and networks. The difference is often sobering.
+
+We capture percentile data (P50, P75, P95, P99) for page load and Core Web Vitals across all applications. P75 is the number we care about most — it's what 75% of users are experiencing or better. That's what Google uses for the Core Web Vitals assessment.
+
+### Grafana Alerts
+
+For every application, we set thresholds in Grafana. When a deploy causes a metric to exceed the threshold, a Slack notification fires. The on-call engineer knows immediately — before the monitoring data has time to aggregate — that something changed.
+
+The alert message includes the affected metric, the page, and a link to the Grafana dashboard. Fast triage, fast fix.
+
+## The Results
+
+After six months:
+
+- **Average Lighthouse score: 69 → 89** (29% improvement)
+- **Pages scoring 90+: 4% → 54%** (50 percentage point increase)
+- **88% of improved pages** were from the monolithic application
+
+The monolith improvements were the hardest and the most satisfying. Every percentage point on a legacy system with millions of weekly users has an outsized real-world impact.
+
+## What I'd Do Differently
+
+**Start with real user data.** We spent too long optimising Lighthouse lab scores before looking at RUM data. Lab scores and real-world performance are correlated but not identical. The slowest real-user percentiles should drive your priorities.
+
+**Make performance a PR gate.** We added Lighthouse CI to our pipeline toward the end of the project. It should have been there from the start — a hard gate that prevents regressions from landing on main.
+
+**Profile before optimising.** We made a few changes early on that didn't move the score at all because we were guessing at the bottleneck. Time spent in Chrome DevTools performance profiling before touching code is never wasted.
+
+## Conclusion
+
+Performance work isn't glamorous. It doesn't ship features, and it's hard to quantify in user-facing terms. But users feel it. Slower pages lose users at every step of the funnel, and the compounding effect on engagement is real.
+
+The four-metric approach gave us focus. TBT through code splitting, LCP through image and compression improvements, FCP through deferring blocking resources, CLS through font and image dimension fixes. Stack those up across 40 pages and you get a 29-point improvement.
+
+The monitoring is what keeps it. Build the habit of watching the numbers, and performance stops being a sprint and starts being a property of the system.

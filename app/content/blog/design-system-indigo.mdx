@@ -1,0 +1,144 @@
+---
+title: "Design System Indigo: How We Built Sendinblue's Component Library from Scratch"
+date: "2022-02-25"
+description: "How we went from inconsistent UIs across dozens of products to a single, shared design system — the architecture decisions, CI/CD pipeline, and lessons learned."
+tags: ["Design Systems", "React", "DevOps"]
+readTime: "8 min read"
+published: true
+---
+
+> "A design system isn't a project. It's a product serving products." — Nathan Curtis
+
+That quote hit me hard the first time I read it. Because when we started building Indigo — Sendinblue's design system — we kept treating it like a project. Ship it, done. Move on. It took us a while to understand that a design system is never done. It evolves alongside the products it serves.
+
+Here's how we built it, what we learned, and what I'd do differently.
+
+## Why We Needed a Design System
+
+As Sendinblue grew, so did the number of teams building UI. And each team, naturally, solved the same problems in slightly different ways. Buttons looked subtly different across pages. Colors were close but not identical. Error states were inconsistent. The overall experience felt… patchy.
+
+The root cause wasn't carelessness — it was the absence of a shared language. Without a system, teams default to local conventions. That's fine for a small team. It breaks down at scale.
+
+We needed something that would let us move fast without creating chaos. That thing was Indigo.
+
+## What Indigo Actually Is
+
+Indigo is three things working together:
+
+1. **A design language in Figma** — the single source of truth for colours, typography, and iconography
+2. **A React component library** — documented in Storybook, distributed via GitHub Packages
+3. **CSS packages** — for teams that just need styles without the React layer
+
+The design language is grounded in four principles we kept returning to throughout the project:
+
+- **Clarity** — every component should communicate its purpose without ambiguity
+- **Scalability** — the system should grow with the product, from simple to sophisticated
+- **User-centredness** — balance between aesthetics and functional clarity
+- **Playfulness** — just enough personality to make interactions feel alive
+
+## The Architecture: Lerna Mono-Repo
+
+After considering a few approaches, we went with a **Lerna mono-repo**. Here's why:
+
+- Single place to discover all available packages
+- Independent versioning per package — you can release a new icon set without bumping the React package
+- Faster onboarding for new contributors
+
+The repo structure looks roughly like this:
+
+```
+indigo/
+├── packages/
+│   ├── css/          # Pure CSS styles, consumable independently
+│   ├── icons/        # SVG icon library
+│   └── react/        # React component library
+├── .github/
+│   └── workflows/    # CI/CD automation
+└── .storybook/       # Storybook config
+```
+
+Each package can be installed individually. If a team only needs the CSS tokens, they don't have to pull in React. Granular consumption was a hard requirement from day one.
+
+## Design Language Details
+
+### Colours
+
+We defined eight core brand colours, each with a specific semantic role. Not every blue is interchangeable — we were deliberate about which colour means "primary action," which means "destructive," which means "informational."
+
+### Typography
+
+Two fonts:
+
+- **Publico** (Medium) for headings — in six size variations
+- **Roboto** (400 for body, 700 for emphasis) in two sizes with multiple colour options
+
+Having a small, deliberate type scale forces consistency. If you can't find your size in the scale, that's a signal you might be solving the wrong problem.
+
+### Iconography
+
+We redesigned our icon set from scratch using the [Feather Icons](https://feathericons.com/) library as a baseline — open-source, simple, outlined. Then we extended it to cover Sendinblue-specific concepts.
+
+## CI/CD: GitHub Actions
+
+The boring parts are the most important parts. A design system that's hard to release is a design system no one updates. So we put serious effort into the pipeline.
+
+We have three core GitHub Actions workflows:
+
+### 1. `build-pr.yml` — Runs on every pull request
+
+```yaml
+steps:
+  - uses: actions/checkout@v3
+  - name: Setup Node
+    uses: actions/setup-node@v3
+  - name: Install dependencies
+    run: yarn install
+  - name: Build packages
+    run: yarn build
+  - name: Run tests
+    run: yarn test
+  - name: Build Storybook
+    run: yarn build-storybook
+```
+
+This gives contributors fast feedback. If a PR breaks a component or fails a test, they know immediately — not after it lands on main.
+
+### 2. `release.yml` — Runs on merge to main
+
+Two jobs in sequence:
+
+**Publish GitHub Packages** — installs, builds, tests, then runs `yarn release` which handles independent package versioning via Lerna. A `GITHUB_TOKEN` secret is passed for private package publishing.
+
+**Publish GitHub Pages** — deploys the latest Storybook build to our Indigo documentation domain, so the docs are always in sync with the release.
+
+### Code Quality
+
+We run Code Climate on every build. It scans for code smells, tracks test coverage, and surfaces maintainability issues before they compound. The score is visible in every PR, which creates subtle positive pressure to keep the codebase clean.
+
+## Storybook: Documentation That Stays Current
+
+The single biggest win for adoption was Storybook. Teams could browse components, read usage guidelines, copy code snippets, and see how components behave in different states — all without leaving their browser.
+
+We document three things for every component:
+
+1. **HTML/CSS showcase** — for teams not using React
+2. **Icons showcase** — with copy-to-clipboard SVG export
+3. **React component showcase** — with props table and live code editor
+
+Auto-deployed on every release. No manual docs updates. That was non-negotiable.
+
+## What I'd Do Differently
+
+**Start with a token system.** We retrofitted design tokens later. Starting with a clear token layer (colour, spacing, typography as variables) would have made theming and dark mode much easier.
+
+**Invest in migration tooling earlier.** Adoption is the hardest part of a design system. We eventually built a tool to track which teams were using which components (more on that in a future post), but we should have done it sooner.
+
+**Treat the design system team as a product team.** Roadmaps, OKRs, user research with the developers who consume the system. The more we treated it like a product, the better it got.
+
+## Conclusion
+
+Building Indigo taught me that a design system is a long-term bet on the speed and consistency of every team that consumes it. The upfront investment is real. So is the compounding return.
+
+If your organisation is at the point where inconsistency is slowing you down, a design system is the right call. Start small, get something into production, and iterate. Don't wait for the perfect design language — you'll discover most of what you need by shipping.
+
+The system is only as good as its adoption. Build for the developers who'll use it, not just the designers who'll design it.

@@ -13,7 +13,7 @@ export default function Footer() {
             GitHub
           </a>
           <a
-            href="https://twitter.com/sahilsharma2408"
+            href="https://x.com/SahilSharma0824"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -21,7 +21,7 @@ export default function Footer() {
             Twitter
           </a>
           <a
-            href="https://linkedin.com/in/sahilsharma2408"
+            href="https://www.linkedin.com/in/sahilsharma241993/"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-gray-900 dark:hover:text-white transition-colors"
