@@ -8,4 +8,6 @@ export default [
   route("projects", "routes/projects.tsx"),
   route("talks", "routes/talks.tsx"),
   route("newsletter", "routes/newsletter.tsx"),
+  route("unsubscribe", "routes/unsubscribe.tsx"),
+  route("admin/subscribers", "routes/admin.subscribers.tsx"),
 ] satisfies RouteConfig;
