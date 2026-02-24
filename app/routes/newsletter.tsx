@@ -18,7 +18,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return { success: false, error: "Please enter a valid email address." };
   }
 
-  const { DB, RESEND_API_KEY, RESEND_FROM_EMAIL } = context.cloudflare.env;
+  const { DB, BREVO_API_KEY, BREVO_FROM_EMAIL, BREVO_FROM_NAME } = context.cloudflare.env;
   const token = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -41,17 +41,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const unsubscribeUrl = `${origin}/unsubscribe?token=${token}`;
 
   try {
-    const res = await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "api-key": BREVO_API_KEY,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: RESEND_FROM_EMAIL,
-        to: email,
+        sender: { name: BREVO_FROM_NAME, email: BREVO_FROM_EMAIL },
+        to: [{ email }],
         subject: "Welcome to Sahil's Newsletter",
-        html: `
+        htmlContent: `
           <h2>Welcome aboard!</h2>
           <p>Thanks for subscribing. You'll get articles on React, TypeScript, and modern web development delivered to your inbox.</p>
           <p>If you ever want to unsubscribe, <a href="${unsubscribeUrl}">click here</a>.</p>
@@ -60,7 +60,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const body = await res.text();
-      console.error("Resend error:", res.status, body);
+      console.error("Brevo error:", res.status, body);
     }
   } catch (err) {
     console.error("Failed to send welcome email:", err);
