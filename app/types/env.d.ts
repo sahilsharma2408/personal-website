@@ -1,7 +1,8 @@
 interface Env {
   DB: D1Database;
-  RESEND_API_KEY: string;
-  RESEND_FROM_EMAIL: string;
+  BREVO_API_KEY: string;
+  BREVO_FROM_EMAIL: string;
+  BREVO_FROM_NAME: string;
   ADMIN_TOKEN: string;
 }
 
